@@ -3,7 +3,7 @@
 ## Ознакомление с руководством программы udev
 
 ```bash
-  `man udev
+  man udev
 ```
 
 ![man udev](1.png)
