@@ -43,9 +43,9 @@
 
 * Создаем файл скрипта
 
-```bash
-  sudo nano /usr/local/bin/task2.sh
-```
+  ```bash
+    sudo nano /usr/local/bin/task2.sh
+  ```
 
 * Содержание нашего скрипта
 
@@ -85,7 +85,7 @@
     WantedBy=multi-user.target #включается в обычной загрузке
   ```
 
-  * Активируем юнит через специальные команды
+* Активируем юнит через специальные команды
 
     ![script2](5.png)
 
@@ -93,7 +93,7 @@
     * `sudo systemctl enable task2.service` - включаем автозапуск
     * `sudo systemctl start task2.service` - запускаем прямо сейчас
    
-  * Смотрим лог-файл
+* Смотрим лог-файл
 
     ![script2](6.png)
 
@@ -128,10 +128,10 @@
 
   * Содержимое
 
-   ```bash
-      # Task3: run every Friday of the 2nd week of the month at 01:12
-      12 01 8-14 * * root [ "$(date '+\%u')" -eq 5 ] && /usr/local/bin/task3.sh
-    ```
+     ```bash
+        # Task3: run every Friday of the 2nd week of the month at 01:12
+        12 01 8-14 * * root [ "$(date '+\%u')" -eq 5 ] && /usr/local/bin/task3.sh
+      ```
 
   * Даем правильные права
  
