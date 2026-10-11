@@ -250,3 +250,86 @@
       echo "*/5 * * * * root env LANG=C /usr/bin/mrtg /etc/mrtg.cfg --logging /var/log/mrtg.log" | sudo tee /etc/cron.d/mrtg-cron
       sudo chmod 644 /etc/cron.d/mrtg-cron
     ```
+
+![script5](9.png)
+
+### Задание 4-5
+
+#### Создать кольцевую БД rrd и обеспечить ее постоянное обновление данными сетевой активности. Сгенерировать график сетевой активности за заданный промежуток времени (на одном графике должен быть и входящий и исходящий трафик).
+
+* Создание кольцевой базы данных enp0s3.rrd и содержимое:
+  
+  ```bash
+    sudo rrdtool create /opt/lab/enp0s3.rrd --step 60 \
+      DS:input:COUNTER:120:U:U \
+      DS:output:COUNTER:120:U:U \
+      RRA:AVERAGE:0.5:1:2880 \
+      RRA:AVERAGE:0.5:5:2016 \
+      RRA:MAX:0.5:2880 \
+      RRA:MAX:0.5:5:2016
+   ```
+
+* Скрипт обновления данных по пути `/opt/lab/rrd_update.sh`:
+
+  ```bash
+    #!/bin/bash
+    DB="/opt/lab/enp0s3.rrd"
+    IFACE="enp0s3"
+    INPUT=$(grep "$IFACE" /proc/net/dev | awk '{print $2}')
+    OUTPUT=$(grep "$IFACE" /proc/net/dev | awk '{print $10}')
+    rrdtool update $DB N:$INPUT:$OUTPUT
+   ```
+
+* Скрипт для отрисовки, который рисует график и кладёт его в каталог `/var/www/html/mrtg/`
+
+  ```bash
+    #!/bin/bash
+    rrdtool graph /var/www/html/mrtg/net_rrd.png \
+    --start -1h --title "Network Traffic (RRDtool)" \
+    --vertical-label "Bytes per second" \
+    --width 600 --height 200 \
+    DEF:inofficial=/opt/lab/enp0s3.rrd:input:AVERAGE \
+    DEF:outofficial=/opt/lab/enp0s3.rrd:output:AVERAGE \
+    CDEF:out_neg=outofficial,-1,* \
+    AREA:inofficial#32CD32:"In " \
+    GPRINT:inofficial:MAX:"Max\: %6.1lf %s" \
+    GPRINT:inofficial:AVERAGE:"Avg\: %6.1lf %s"
+    GPRINT:inofficial:LAST:"Curr\: %6.1lf %s\n" \
+    HRULE:0#000000 \
+    AREA:out_neg#0033CC:"Out" \
+    GPRINT:outofficial:MAX:"Max\: %6.1lf %s" \
+    GPRINT:outofficial:AVERAGE:"Avg\: %6.1lf %s" \
+    GPRINT:outofficial:LAST:"Curr\: %6.1lf %s\n"
+   ```
+
+* Также через cron регестрируем 2 скрипта
+
+  ```bash
+    echo "* * * * * root /opt/lab/rrd_update.sh" | sudo tee
+    /etc/cron.d/cron_rrd_update
+    sudo chmod 644 /etc/cron.d/cron_rrd_update
+    
+    echo "* * * * * root /opt/lab/rrd_draw_graph.sh" | sudo tee
+    /etc/cron.d/cron_rrd_draw
+    sudo chmod 644 /etc/cron.d/cron_rrd_draw
+  ```
+
+![script5](10.png)
+
+### Задание 6
+
+#### Проверить работоспособность при обращении к некоторым общедоступным веб-ресурсам при помощи утилит трассировки маршрута. Наложить путь на географическую карту. В качестве веб-ресурса можно использовать сайты google.com, kernel.org, ubuntu.com
+
+* Скачиваем `nxtrace`
+  
+  ```bash
+    curl -sL https://nxtrace.org/nt | sudo bash
+  ```
+
+* Трассировка соединения
+
+  ```bash
+    sudo nexttrace -g en google.com
+  ```
+
+![script5](11.png)
