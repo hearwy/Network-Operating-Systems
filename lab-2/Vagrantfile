@@ -1,0 +1,38 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/focal64"
+
+  config.vm.boot_timeout = 600
+
+  # Настройки провайдера VirtualBox
+  config.vm.provider "virtualbox" do |vb|
+    vb.gui = false
+    vb.memory = "2048"
+    vb.cpus = 2
+  end
+
+  # Автоматический запуск скрипта настройки 
+  config.vm.provision "shell", inline: <<-SHELL
+    echo "=== Начало настройки окружения ==="
+
+    # 1. Создание пользовательских правил udev в /etc/udev/rules.d/
+    # Правило для создания папки при добавлении диска 
+    echo 'KERNEL=="sdc", ACTION=="add", RUN+="/bin/mkdir -p /home/vagrant/new_dir"' | sudo tee /etc/udev/rules.d/91-myrule.rules > /dev/null
+
+    # Правило для записи логов при подключении/отключении устройства
+    echo 'KERNEL=="sdc", ACTION=="add", RUN+="/bin/sh -c \\"echo inserted >> /home/vagrant/udev.log\\""' | sudo tee /etc/udev/rules.d/92-nerule.rules > /dev/null
+    echo 'KERNEL=="sdc", ACTION=="remove", RUN+="/bin/sh -c \\"echo removed >> /home/vagrant/udev.log\\""' | sudo tee -a /etc/udev/rules.d/92-nerule.rules > /dev/null
+
+    # Перезагрузка правил udev
+    sudo udevadm control --reload-rules
+
+    # 2. Загрузка msdos
+    echo "=== Загрузка модуля ядра msdos ==="
+    sudo modprobe msdos
+    lsmod | grep msdos
+
+    echo "=== Настройка завершена успешно ==="
+  SHELL
+end
