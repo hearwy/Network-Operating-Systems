@@ -1,0 +1,215 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/focal64"
+
+  # Увеличиваем тайм-аут загрузки
+  config.vm.boot_timeout = 600
+
+  # веб-интерфейс MRTG доступен на хосте по адресу http://localhost:8080/mrtg/
+  config.vm.network "forwarded_port", guest: 80, host: 8080
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.gui = false  # Запуск в фоновом режиме
+    vb.memory = "2048"
+    vb.cpus = 2
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+    echo "=== Начало настройки окружения ==="
+
+    # Обновление пакетов и установка необходимых утилит 
+    export DEBIAN_FRONTEND=noninteractive
+    sudo apt-get update
+    sudo apt-get install -y apache2 mrtg snmp snmpd rrdtool curl gawk
+
+    # Запуск и включение сервисов SNMP и Apache
+    sudo systemctl restart snmpd
+    sudo systemctl enable snmpd
+    sudo systemctl restart apache2
+    sudo systemctl enable apache2
+
+    # Создание рабочей директории для MRTG
+    sudo mkdir -p /var/www/html/mrtg
+    sudo chown -R www-data:www-data /var/www/html/mrtg
+
+    # ==========================================
+    # Часть 1. Задание 1: Sysvinit скрипт
+    # ==========================================
+    sudo tee /etc/init.d/task-init > /dev/null << 'EOF'
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          task-init
+# Required-Start:    $all
+# Required-Stop:     
+# Default-Start:     1
+# Default-Stop:      0 6
+# Short-Description: Custom task initialization script
+# Description:       Script running last in single-user mode with stop/start support
+### END INIT INFO
+
+LOG_FILE="/var/log/task-init.log"
+
+case "$1" in
+    start)
+        echo "$(date): task-init started" >> "$LOG_FILE"
+        ;;
+    stop)
+        echo "$(date): task-init stopped" >> "$LOG_FILE"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+exit 0
+EOF
+
+    sudo chmod +x /etc/init.d/task-init
+    sudo update-rc.d task-init defaults
+
+    # ==========================================
+    # Часть 1. Задание 2: Systemd юнит
+    # ==========================================
+    sudo tee /usr/local/bin/task2.sh > /dev/null << 'EOF'
+#!/bin/bash
+echo "==== $(date) ====" >> /var/log/task2.log
+mount >> /var/log/task2.log
+echo "" >> /var/log/task2.log
+EOF
+    sudo chmod +x /usr/local/bin/task2.sh
+
+    sudo tee /etc/systemd/system/task2.service > /dev/null << 'EOF'
+[Unit]
+Description=Task2 - save mounted filesystems to log
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/task2.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable task2.service
+    sudo systemctl start task2.service
+
+    # ==========================================
+    # Часть 1. Задание 3: Cron задача
+    # ==========================================
+    sudo tee /usr/local/bin/task3.sh > /dev/null << 'EOF'
+#!/bin/bash
+echo "task3: cron task executed on $(date)" >> /var/log/task3.log
+EOF
+    sudo chmod +x /usr/local/bin/task3.sh
+
+    sudo tee /etc/cron.d/task3 > /dev/null << 'EOF'
+# Task3: run every Friday of the 2nd week of the month at 01:12
+12 01 8-14 * * root [ "$(date '+\%u')" -eq 5 ] && /usr/local/bin/task3.sh
+EOF
+    sudo chmod 644 /etc/cron.d/task3
+
+    # ==========================================
+    # Часть 2. Задание 1-3: Сбор статистики и MRTG
+    # ==========================================
+    sudo tee /root/network_stat.sh > /dev/null << 'EOF'
+#!/bin/bash
+INTERFACE="enp0s3"
+RX=$(grep "$INTERFACE" /proc/net/dev | awk '{print $2}')
+TX=$(grep "$INTERFACE" /proc/net/dev | awk '{print $10}')
+UPTIME=$(uptime -p)
+
+echo "$RX"
+echo "$TX"
+echo "$UPTIME"
+echo "$INTERFACE"
+EOF
+    sudo chmod +x /root/network_stat.sh
+
+    # Конфиг MRTG
+    sudo tee /etc/mrtg.cfg > /dev/null << 'EOF'
+WriteExpires: Yes
+Refresh: 300
+
+WithPeak[_]: wym
+Suppress[_]: y
+
+Target[enp0s3]: `/root/network_stat.sh`
+WorkDir: /var/www/html/mrtg
+
+Options[enp0s3]: growright
+Title[enp0s3]: enp0s3 Traffic Analysis
+PageTop[enp0s3]: <h1>enp0s3 Traffic</h1>
+MaxBytes[enp0s3]: 12500000
+kilo[enp0s3]: 1024
+
+YLegend[enp0s3]: Bytes per Second
+ShortLegend[enp0s3]: b/s
+LegendI[enp0s3]: In Traffic:
+LegendO[enp0s3]: Out Traffic:
+EOF
+
+    # Генерация HTML-страницы MRTG
+    sudo indexmaker --output=/var/www/html/mrtg/index.html /etc/mrtg.cfg
+
+    # Cron для MRTG (каждые 5 минут)
+    echo "*/5 * * * * root env LANG=C /usr/bin/mrtg /etc/mrtg.cfg --logging /var/log/mrtg.log" | sudo tee /etc/cron.d/mrtg-cron > /dev/null
+    sudo chmod 644 /etc/cron.d/mrtg-cron
+
+    # ==========================================
+    # Часть 2. Задание 4-5: RRDtool база и графики
+    # ==========================================
+    sudo mkdir -p /opt/lab
+
+    sudo rrdtool create /opt/lab/enp0s3.rrd --step 60 \
+      DS:input:COUNTER:120:U:U \
+      DS:output:COUNTER:120:U:U \
+      RRA:AVERAGE:0.5:1:2880 \
+      RRA:AVERAGE:0.5:5:2016 \
+      RRA:MAX:0.5:2880 \
+      RRA:MAX:0.5:5:2016
+
+    sudo tee /opt/lab/rrd_update.sh > /dev/null << 'EOF'
+#!/bin/bash
+DB="/opt/lab/enp0s3.rrd"
+IFACE="enp0s3"
+INPUT=$(grep "$IFACE" /proc/net/dev | awk '{print $2}')
+OUTPUT=$(grep "$IFACE" /proc/net/dev | awk '{print $10}')
+rrdtool update $DB N:$INPUT:$OUTPUT
+EOF
+    sudo chmod +x /opt/lab/rrd_update.sh
+
+    sudo tee /opt/lab/rrd_draw_graph.sh > /dev/null << 'EOF'
+#!/bin/bash
+rrdtool graph /var/www/html/mrtg/net_rrd.png \
+--start -1h --title "Network Traffic (RRDtool)" \
+--vertical-label "Bytes per second" \
+--width 600 --height 200 \
+DEF:inofficial=/opt/lab/enp0s3.rrd:input:AVERAGE \
+DEF:outofficial=/opt/lab/enp0s3.rrd:output:AVERAGE \
+CDEF:out_neg=outofficial,-1,* \
+AREA:inofficial#32CD32:"In " \
+GPRINT:inofficial:MAX:"Max\\: %6.1lf %s" \
+GPRINT:inofficial:AVERAGE:"Avg\\: %6.1lf %s" \
+GPRINT:inofficial:LAST:"Curr\\: %6.1lf %s\\n" \
+HRULE:0#000000 \
+AREA:out_neg#0033CC:"Out" \
+GPRINT:outofficial:MAX:"Max\\: %6.1lf %s" \
+GPRINT:outofficial:AVERAGE:"Avg\\: %6.1lf %s" \
+GPRINT:outofficial:LAST:"Curr\\: %6.1lf %s\\n"
+EOF
+    sudo chmod +x /opt/lab/rrd_draw_graph.sh
+
+    # Cron для RRDtool (каждую минуту)
+    echo "* * * * * root /opt/lab/rrd_update.sh" | sudo tee /etc/cron.d/cron_rrd_update > /dev/null
+    sudo chmod 644 /etc/cron.d/cron_rrd_update
+
+    echo "* * * * * root /opt/lab/rrd_draw_graph.sh" | sudo tee /etc/cron.d/cron_rrd_draw > /dev/null
+    sudo chmod 644 /etc/cron.d/cron_rrd_draw
+
+    echo "=== Настройка успешно завершена ==="
+  SHELL
+end
